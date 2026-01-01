@@ -240,8 +240,8 @@ import { DatabaseManager } from './worker/DatabaseManager.js';
 import { SessionManager } from './worker/SessionManager.js';
 import { SSEBroadcaster } from './worker/SSEBroadcaster.js';
 import { SDKAgent } from './worker/SDKAgent.js';
-import { GeminiAgent } from './worker/GeminiAgent.js';
-import { OpenRouterAgent } from './worker/OpenRouterAgent.js';
+import { GeminiAgent, isGeminiSelected, isGeminiAvailable } from './worker/GeminiAgent.js';
+import { OpenRouterAgent, isOpenRouterSelected, isOpenRouterAvailable } from './worker/OpenRouterAgent.js';
 import { PaginationHelper } from './worker/PaginationHelper.js';
 import { SettingsManager } from './worker/SettingsManager.js';
 import { SearchManager } from './worker/SearchManager.js';
@@ -731,8 +731,34 @@ export class WorkerService {
   }
 
   /**
+   * Get the currently selected provider based on settings
+   * Used for startup-recovery to respect CLAUDE_MEM_PROVIDER setting
+   */
+  private getSelectedProvider(): 'claude' | 'gemini' | 'openrouter' {
+    if (isOpenRouterSelected() && isOpenRouterAvailable()) {
+      return 'openrouter';
+    }
+    return (isGeminiSelected() && isGeminiAvailable()) ? 'gemini' : 'claude';
+  }
+
+  /**
+   * Get the appropriate agent for the selected provider
+   */
+  private getAgentForProvider(provider: 'claude' | 'gemini' | 'openrouter') {
+    switch (provider) {
+      case 'openrouter':
+        return this.openRouterAgent;
+      case 'gemini':
+        return this.geminiAgent;
+      default:
+        return this.sdkAgent;
+    }
+  }
+
+  /**
    * Start a session processor
    * It will run continuously until the session is deleted/aborted
+   * Respects CLAUDE_MEM_PROVIDER setting for provider selection
    */
   private startSessionProcessor(
     session: ReturnType<typeof this.sessionManager.getSession>,
@@ -741,11 +767,19 @@ export class WorkerService {
     if (!session) return;
 
     const sid = session.sessionDbId;
-    logger.info('SYSTEM', `Starting generator (${source})`, {
-      sessionId: sid
+    const provider = this.getSelectedProvider();
+    const agent = this.getAgentForProvider(provider);
+    const agentName = provider === 'openrouter' ? 'OpenRouter' : (provider === 'gemini' ? 'Gemini' : 'Claude SDK');
+
+    logger.info('SYSTEM', `Starting generator (${source}) using ${agentName}`, {
+      sessionId: sid,
+      provider
     });
 
-    session.generatorPromise = this.sdkAgent.startSession(session, this)
+    // Track which provider is running
+    session.currentProvider = provider;
+
+    session.generatorPromise = agent.startSession(session, this)
       .catch(error => {
         // Only log if not aborted
         if (session.abortController.signal.aborted) return;
