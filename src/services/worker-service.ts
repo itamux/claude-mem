@@ -2079,6 +2079,24 @@ async function main() {
   }
 }
 
-if (require.main === module || !module.parent) {
+// ESM-compatible entry point detection
+// Works in both Node.js ESM and bun environments
+const isMainModule = (() => {
+  try {
+    // Check for bun/ESM environment first
+    if (typeof (import.meta as any).main !== 'undefined') {
+      return (import.meta as any).main;
+    }
+    // Fallback for Node.js CommonJS
+    if (typeof require !== 'undefined' && typeof module !== 'undefined') {
+      return require.main === module;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+})();
+
+if (isMainModule) {
   main();
 }

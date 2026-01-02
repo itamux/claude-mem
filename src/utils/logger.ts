@@ -28,19 +28,25 @@ class Logger {
   private level: LogLevel | null = null;
   private useColor: boolean;
   private logFilePath: string | null = null;
+  private logFileInitialized: boolean = false;
 
   constructor() {
     // Disable colors when output is not a TTY (e.g., PM2 logs)
     this.useColor = process.stdout.isTTY ?? false;
-    this.initializeLogFile();
+    // Note: Log file initialization is deferred to first log call
+    // to avoid circular dependency with SettingsDefaultsManager
   }
 
   /**
    * Initialize log file path and ensure directory exists
+   * Called lazily on first log to avoid circular dependency issues
    */
   private initializeLogFile(): void {
+    if (this.logFileInitialized) return;
+    this.logFileInitialized = true;
+
     try {
-      // Get data directory from settings
+      // Get data directory from settings (safe now - SettingsDefaultsManager is initialized)
       const dataDir = SettingsDefaultsManager.get('CLAUDE_MEM_DATA_DIR');
       const logsDir = join(dataDir, 'logs');
 
@@ -261,6 +267,9 @@ class Logger {
     }
 
     const logLine = `[${timestamp}] [${levelStr}] [${componentStr}] ${correlationStr}${message}${contextStr}${dataStr}`;
+
+    // Lazy initialization of log file (deferred to avoid circular dependency)
+    this.initializeLogFile();
 
     // Output to log file ONLY (worker runs in background, console is useless)
     if (this.logFilePath) {
